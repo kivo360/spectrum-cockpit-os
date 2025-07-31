@@ -1,0 +1,34 @@
+# Example configuration file for Advanced Task Manager
+# Copy this to config.toml and modify as needed
+
+# Global settings
+debug = false
+data_dir = "./data"
+
+[database]
+# Database configuration
+path = "tasks.db"                    # Path to DuckDB database file
+backup_enabled = true                # Enable automatic backups
+backup_interval_hours = 24           # Backup interval in hours
+optimize_on_startup = true           # Optimize database on startup
+
+[server]
+# MCP server configuration
+name = "advanced-task-manager"       # Server name
+version = "1.0.0"                   # Server version
+log_level = "INFO"                  # Logging level (DEBUG, INFO, WARNING, ERROR)
+max_tasks_per_query = 1000          # Maximum tasks returned per query
+
+[storage]
+# Storage backend configuration
+enable_graph_cache = true           # Enable graph storage caching
+max_graph_nodes = 10000             # Maximum nodes in graph
+enable_table_indexes = true         # Enable table indexes
+bulk_insert_batch_size = 100        # Batch size for bulk operations
+
+[ui]
+# User interface configuration
+cli_colors = true                   # Enable CLI colors
+progress_bars = true                # Show progress bars
+table_max_width = 120               # Maximum table width in CLI
+auto_wrap_text = true               # Auto-wrap long text

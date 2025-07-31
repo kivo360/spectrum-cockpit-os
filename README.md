@@ -1,12 +1,20 @@
-# Task Manager MCP Server
+# Advanced Task Manager MCP Server
 
-A template implementation of the [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for managing tasks and projects. This server provides a comprehensive task management system with support for project organization, task tracking, and PRD parsing.
+A comprehensive implementation of the [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for advanced task management with graph and table storage. This server provides a sophisticated task management system with dependency tracking, topological sorting, and dual storage backends.
 
 ## Overview
 
-This project demonstrates how to build an MCP server that enables AI agents to manage tasks, track project progress, and break down Product Requirements Documents (PRDs) into actionable tasks. It serves as a practical template for creating your own MCP servers with task management capabilities.
+This project demonstrates how to build a production-ready MCP server using **FastMCP** that enables AI agents to manage complex projects with task dependencies, track progress across multiple storage systems, and maintain data integrity through comprehensive validation. It serves as a complete reference implementation for building advanced MCP servers.
 
-The implementation follows the best practices laid out by Anthropic for building MCP servers, allowing seamless integration with any MCP-compatible client.
+**Key Technologies:**
+- **FastMCP**: Modern MCP server framework with decorator-based tool definitions
+- **Typer**: CLI interface with rich formatting and type safety
+- **Pydantic v2**: Data validation and serialization with modern patterns
+- **NetworkX**: Graph-based dependency management with cycle detection
+- **DuckDB**: High-performance table storage with JSON querying
+- **Rich**: Beautiful CLI output with tables, panels, and progress bars
+
+The implementation follows modern Python patterns and MCP best practices, providing seamless integration with any MCP-compatible client.
 
 ## Features
 
