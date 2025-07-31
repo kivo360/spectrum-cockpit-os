@@ -20,15 +20,18 @@ from src.models.task import (
     TaskDependency,
 )
 from src.services.task_service import TaskService
+from src.services.task_splitting_service import TaskSplittingService
 from src.storage.duckdb_table import DuckDBTableStorage
 from src.storage.networkx_graph import NetworkXGraphStorage
+from src.schemas.splitting_schemas import RawTaskSplitSchema
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global service instance
+# Global service instances
 task_service: Optional[TaskService] = None
+task_splitting_service: Optional[TaskSplittingService] = None
 
 
 class TaskCreationRequest(BaseModel):
@@ -73,6 +76,8 @@ class TaskQueryRequest(BaseModel):
 
 async def initialize_service() -> TaskService:
     """Initialize the task service with storage backends."""
+    global task_service, task_splitting_service
+    
     # Get database path from environment or use default
     db_path = os.getenv("TASK_DB_PATH", "tasks.db")
     
@@ -80,11 +85,13 @@ async def initialize_service() -> TaskService:
     table_storage = DuckDBTableStorage(Task, database_path=db_path)
     graph_storage = NetworkXGraphStorage()
     
-    # Create service
-    service = TaskService(table_storage, graph_storage)
+    # Create services
+    task_service = TaskService(table_storage, graph_storage)
+    task_splitting_service = TaskSplittingService(task_service)
     
     logger.info(f"Task service initialized with database: {db_path}")
-    return service
+    logger.info("Task splitting service initialized")
+    return task_service
 
 
 def format_task_summary(task: Task) -> str:
@@ -547,6 +554,148 @@ def create_mcp() -> FastMCP:
         
         except Exception as e:
             return f"❌ Error bulk creating tasks: {e}"
+    
+    @mcp.tool()
+    async def split_tasks(
+        updateMode: str = "clearAllTasks",
+        tasksRaw = None,  # Can be str or list - FastMCP auto-parses JSON
+        globalAnalysisResult: str = None
+    ) -> str:
+        """
+        Split complex tasks into manageable subtasks with intelligent decomposition.
+        
+        Supports four update modes:
+        - clearAllTasks: Remove all existing tasks and create new ones (default)
+        - append: Add new tasks to existing ones
+        - selective: Update matching tasks by name, create new ones
+        - overwrite: Remove unfinished tasks, keep completed ones, add new ones
+        
+        Args:
+            updateMode: Task update strategy
+            tasksRaw: JSON string containing array of task templates
+            globalAnalysisResult: Overall project goal applicable to all tasks
+        """
+        try:
+            # Validate input parameters
+            if not tasksRaw:
+                return "❌ Error: tasksRaw parameter is required"
+            
+            # Handle both string (JSON) and already parsed list inputs from FastMCP
+            if isinstance(tasksRaw, str):
+                # JSON string - need to parse
+                try:
+                    tasks_data = json.loads(tasksRaw)
+                except json.JSONDecodeError as e:
+                    return f"❌ Invalid JSON in tasksRaw: {e}"
+                
+                # Validate string input using schema
+                raw_request_data = {
+                    "updateMode": updateMode,
+                    "tasksRaw": tasksRaw, 
+                    "globalAnalysisResult": globalAnalysisResult
+                }
+                
+                try:
+                    RawTaskSplitSchema.model_validate(raw_request_data)
+                except ValidationError as e:
+                    return f"❌ Validation Error: {e}"
+                    
+            elif isinstance(tasksRaw, list):
+                # Already parsed by FastMCP
+                tasks_data = tasksRaw
+                
+                # For pre-parsed data, skip schema validation since it requires string
+                if not tasks_data:
+                    return "❌ Error: tasksRaw cannot be empty"
+                    
+            else:
+                return f"❌ Error: tasksRaw must be a JSON string or list, got {type(tasksRaw)}"
+            
+            # Convert to internal models
+            from src.models.task_splitting import TaskSplitRequest, TaskTemplate, UpdateMode
+            from src.models.task import RelatedFile, RelatedFileType
+            
+            # Convert updateMode string to enum
+            try:
+                update_mode = UpdateMode(updateMode)
+            except ValueError:
+                return f"❌ Invalid updateMode: {updateMode}. Must be one of: append, overwrite, selective, clearAllTasks"
+            
+            # Convert task data to TaskTemplate objects
+            task_templates = []
+            for task_data in tasks_data:
+                try:
+                    # Handle related files if present
+                    related_files = []
+                    if "relatedFiles" in task_data:
+                        for file_data in task_data["relatedFiles"]:
+                            related_file = RelatedFile(
+                                path=file_data["path"],
+                                type=RelatedFileType(file_data["type"]),
+                                description=file_data["description"],
+                                line_start=file_data.get("lineStart"),
+                                line_end=file_data.get("lineEnd")
+                            )
+                            related_files.append(related_file)
+                    
+                    template = TaskTemplate(
+                        name=task_data["name"],
+                        description=task_data["description"],
+                        implementation_guide=task_data["implementation_guide"],
+                        dependencies=task_data.get("dependencies", []),
+                        notes=task_data.get("notes"),
+                        related_files=related_files,
+                        verification_criteria=task_data.get("verificationCriteria")
+                    )
+                    task_templates.append(template)
+                    
+                except (KeyError, ValueError) as e:
+                    return f"❌ Invalid task data: {e}"
+            
+            # Create split request
+            split_request = TaskSplitRequest(
+                update_mode=update_mode,
+                task_templates=task_templates,
+                global_analysis_result=globalAnalysisResult
+            )
+            
+            # Execute the split operation
+            result = await task_splitting_service.split_tasks(split_request)
+            
+            # Format response
+            if result.success:
+                content = [f"✅ **Task Split Operation Successful**", ""]
+                content.append(f"**Mode**: {result.operation.update_mode.value}")
+                content.append(f"**Tasks Before**: {result.operation.tasks_before_count}")
+                content.append(f"**Tasks After**: {result.operation.tasks_after_count}")
+                content.append(f"**Tasks Added**: {result.operation.tasks_added}")
+                content.append(f"**Tasks Updated**: {result.operation.tasks_updated}")
+                content.append(f"**Tasks Removed**: {result.operation.tasks_removed}")
+                content.append("")
+                content.append(f"**Message**: {result.message}")
+                
+                if result.created_tasks:
+                    content.append("")
+                    content.append("**Created/Updated Tasks:**")
+                    for task in result.created_tasks:
+                        content.append(format_task_summary(task))
+                        content.append("")
+                
+                return "\n".join(content)
+            else:
+                content = [f"❌ **Task Split Operation Failed**", ""]
+                content.append(f"**Message**: {result.message}")
+                if result.errors:
+                    content.append("")
+                    content.append("**Errors:**")
+                    for error in result.errors:
+                        content.append(f"- {error}")
+                
+                return "\n".join(content)
+        
+        except Exception as e:
+            logger.error(f"Error in split_tasks tool: {e}")
+            return f"❌ Unexpected error during task splitting: {e}"
     
     return mcp
 
